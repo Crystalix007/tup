@@ -136,11 +136,6 @@ int main(int argc, char **argv)
 			return 1;
 		version();
 		return 0;
-	} else if(strcmp(cmd, "generate") == 0) {
-		if(generate(argc, argv) < 0)
-			return 1;
-		tup_valgrind_cleanup();
-		return 0;
 	} else if(strcmp(cmd, "privileged") == 0) {
 #ifdef __linux__
 		if(unshare(CLONE_NEWUSER) == 0) {
@@ -197,6 +192,15 @@ int main(int argc, char **argv)
 		rc = tupid(argc, argv);
 	} else if(strcmp(cmd, "inputs") == 0) {
 		rc = inputs(argc, argv);
+	} else if(strcmp(cmd, "generate") == 0) {
+		/* find_tup_dir() is needed on Windows, otherwise we can't
+		 * fchdir() to the top of the tup hierarchy.
+		 */
+		if(find_tup_dir() != 0) {
+			fprintf(stderr, "No .tup directory found. Either create a Tupfile.ini file at the top of your project, or manually run 'tup init' there.\n");
+			return -1;
+		}
+		rc = generate(argc, argv);
 	} else if(strcmp(cmd, "graph") == 0) {
 		rc = graph(argc, argv);
 	} else if(strcmp(cmd, "scan") == 0) {

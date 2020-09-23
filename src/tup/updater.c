@@ -254,7 +254,7 @@ int generate(int argc, char **argv)
 	int verbose_script = 0;
 	int is_batch_script = 0;
 	int x;
-	int rc;
+	int rc = -1;
 	const char *file_open_flags = "w";
 #ifdef _WIN32
 	const char *example_script = "script_name.bat | script_name.sh";
@@ -354,10 +354,13 @@ int generate(int argc, char **argv)
 	}
 	remove_node(&g, n);
 
+	if(server_init(SERVER_PARSER_MODE) < 0)
+		return -1;
+
 	TAILQ_FOREACH_SAFE(n, &g.plist, list, tmp) {
 		if(!n->already_used)
-			if(parse(n, &g, NULL, 0, 0, full_deps) < 0)
-				return -1;
+			if(parse(n, &g, NULL, 0, 1, full_deps) < 0)
+				goto out;
 		TAILQ_REMOVE(&g.plist, n, list);
 		while(!LIST_EMPTY(&n->incoming)) {
 			remove_edge(LIST_FIRST(&n->incoming));
@@ -365,18 +368,18 @@ int generate(int argc, char **argv)
 		remove_node(&g, n);
 	}
 	if(destroy_graph(&g) < 0)
-		return -1;
+		goto out;
 
 	printf("Generate: %s\n", script_name);
 	if(chdir(get_tup_top()) < 0) {
 		perror("chdir(get_tup_top())\n");
-		return -1;
+		goto out;
 	}
 	generate_f = fopen(script_name, file_open_flags);
 	if(!generate_f) {
 		perror(script_name);
 		fprintf(stderr, "tup error: Unable to open script for writing.\n");
-		return -1;
+		goto out;
 	}
 	if(is_batch_script) {
 		fprintf(generate_f, "@echo %s\n", verbose_script ? "ON" : "OFF");
@@ -384,11 +387,11 @@ int generate(int argc, char **argv)
 		fprintf(generate_f, "#! /bin/sh -e%s\n", verbose_script ? "x" : "");
 	}
 	if(create_graph(&g, TUP_NODE_CMD, -1) < 0)
-		return -1;
+		goto out;
 	if(tup_db_select_node_by_flags(build_graph_cb, &g, TUP_FLAGS_MODIFY) < 0)
-		return -1;
+		goto out;
 	if(build_graph(&g) < 0)
-		return -1;
+		goto out;
 
 	/* Loop through all the nodes and pull out any generated directories.
 	 * The script will 'mkdir' all of these at the top of the script.
@@ -397,27 +400,29 @@ int generate(int argc, char **argv)
 	TAILQ_FOREACH(n, &g.node_list, list) {
 		if(n->tent->type == TUP_NODE_GENERATED) {
 			if(generate_script_mkdir(generate_f, &generated_dir_root, n->tent->parent) < 0)
-				return -1;
+				goto out;
 		}
 	}
 	free_tupid_tree(&generated_dir_root);
 
 	if(tup_entry_add(DOT_DT, &generate_cwd) < 0)
-		return -1;
+		goto out;
 	rc = execute_graph(&g, 0, 1, generate_work);
 	if(rc < 0)
-		return -1;
+		goto out;
+	rc = -1;
 	fclose(generate_f);
 	chmod(script_name, 0755);
 	if(destroy_graph(&g) < 0)
-		return -1;
+		goto out;
 	tup_db_commit();
-	if(tup_db_close() < 0)
+	rc = 0;
+
+out:
+	if(server_quit() < 0)
 		return -1;
-	if(close(tup_top_fd()) < 0) {
-		perror("close(tup_top_fd())");
-	}
-	return 0;
+
+	return rc;
 }
 
 int todo(int argc, char **argv)
